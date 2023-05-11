@@ -1,5 +1,5 @@
 import datetime
-TOKEN = "6175627267:AAFpTEFRGuGwBf41cs5xT19KdcEEbLJucSQ"
+TOKEN = ""
 day_chisl = datetime.datetime(2023, 9, 10)
 
 number_in_days = {0: 'Понедельник',
