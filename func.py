@@ -9,13 +9,12 @@ from main import bot
 
 def db_start():
     global db, cur
-    db = sq.connect('rasp.db')    # подключение к базе данных
-    cur = db.cursor()             # создание курсора для взаимодействия с базой данных
+    db = sq.connect('rasp.db')  # подключение к базе данных
+    cur = db.cursor()  # создание курсора для взаимодействия с базой данных
     create_table_users()
 
 
 def create_table_rasp(kurs):
-
     cur.execute("""CREATE TABLE IF NOT EXISTS '{}' 
                       (day TEXT, time TEXT,specialty TEXT, groupp TEXT, subj1 TEXT, 
                       teach1 TEXT, clas1 TEXT, subj2 TEXT, teach3 TEXT, clas2 TEXT)""".format(kurs))
@@ -24,7 +23,6 @@ def create_table_rasp(kurs):
 
 
 def create_table_users():
-
     cur.execute("""CREATE TABLE IF NOT EXISTS users
                          (user_id TEXT, username TEXT, name TEXT, kurs INTEGER, 
                          groupp TEXT, st_or_teach INTEGER, teacher TEXT)""")
@@ -34,7 +32,7 @@ def create_table_users():
 
 async def create_profile_student(message: types.CallbackQuery, kurs, group):
     cur.execute("SELECT 1 FROM users WHERE user_id == '{}'"
-                      .format(message.from_user.id))
+                .format(message.from_user.id))
 
     user = cur.fetchone()
 
@@ -46,7 +44,7 @@ async def create_profile_student(message: types.CallbackQuery, kurs, group):
 
 async def create_profile_teacher(message: types.CallbackQuery, teacher):
     cur.execute("SELECT 1 FROM users WHERE user_id == '{}'"
-                      .format(message.from_user.id))
+                .format(message.from_user.id))
     user = cur.fetchone()
 
     if not user:
@@ -71,25 +69,33 @@ async def delete_profile(user_id):
 
 def add_rasp(raw_table: list, kurs):
     cur.execute("INSERT INTO '{}' VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)".format(kurs),
-                    (raw_table[0], raw_table[1], raw_table[2], raw_table[3], raw_table[4], raw_table[5], raw_table[6], raw_table[7], raw_table[8], raw_table[9]))
+                (raw_table[0], raw_table[1], raw_table[2], raw_table[3], raw_table[4], raw_table[5], raw_table[6],
+                 raw_table[7], raw_table[8], raw_table[9]))
     db.commit()
 
 
 async def get_rasp(day, kurs, group: str):
-    split_group = group.split()
-    specialty = split_group[0]
-    group_cut = split_group[-1]
-    print(group)
-    if specialty == group:
-        cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}'".format(kurs, day, group_cut))
-        print(1)
+    if kurs != 'СПО':
+        split_group = group.split()
+        specialty = split_group[0]
+        group_cut = split_group[-1]
+        print(group)
+        if specialty == group:
+            cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}'".format(kurs, day, group_cut))
+            print(1)
 
-    elif group[-1].isdigit() or group[-1] == ')':
-        cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}'".format(kurs, day, group))
-        print(2)
+        elif group[-1].isdigit() or group[-1] == ')':
+            cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}'".format(kurs, day, group))
+            print(2)
+        else:
+            cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}' AND specialty = '{}'".format(kurs, day,
+                                                                                                            group_cut,
+                                                                                                            specialty))
+            print(3)
+
     else:
-        cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}' AND specialty = '{}'".format(kurs, day, group_cut, specialty))
-        print(3)
+        cur.execute("SELECT * FROM '{}' WHERE day = '{}' AND groupp = '{}'".format(kurs, day, group))
+
     day_rasp = cur.fetchall()
     return day_rasp
 
@@ -98,7 +104,7 @@ async def get_teachers():
     kurses = await get_kurs()
     teachers = list()
     for kurs in kurses:
-        if kurs[1] != 'users' and not('old' in kurs[1]):
+        if kurs[1] != 'users' and not ('old' in kurs[1]):
             cur.execute("SELECT DISTINCT teach1 FROM '{}' WHERE teach1 IS NOT NULL".format(kurs[1]))
             teachers.extend(cur.fetchall())
             cur.execute("SELECT DISTINCT teach3 FROM '{}' WHERE teach3 IS NOT NULL".format(kurs[1]))
@@ -177,7 +183,7 @@ def normalize(target_str):
 
 
 async def rename_tables(kurs):
-    cur.execute("ALTER TABLE '{}' RENAME TO '{}'".format(kurs[1], kurs[1] + '_old'))
+    cur.execute("ALTER TABLE '{}' RENAME TO '{}'".format(kurs, kurs + '_old'))
     db.commit()
 
 
@@ -186,7 +192,6 @@ async def get_diff_rasp(day, kurs, group):
     old_rasp = await get_rasp(day, kurs + '_old', group)
 
     text = f'<b><u>{number_in_days.get(day)}</u></b>\n'
-
 
     if len(rasp) < len(old_rasp):
         min_len = len(rasp)
@@ -214,9 +219,14 @@ async def get_diff_rasp(day, kurs, group):
 async def delete_old():
     tables = await get_kurs()
     for table in tables:
-        if 'old' in table[1]:
+        if 'old' in table[1] and "СПО" not in table[1]:
             cur.execute('DROP TABLE IF EXISTS "{}"'.format(table[1]))
             db.commit()
+
+
+async def delete_old_spo():
+    cur.execute('DROP TABLE IF EXISTS "СПО_old"')
+    db.commit()
 
 
 async def get_all_diff():
@@ -268,7 +278,7 @@ async def get_teach_rasp(day, message):
     kurses = await get_kurs()
     ch_or_zn = chisl_or_znam(day)
     for kurs in kurses:
-        if kurs[1] != "users" and not('old' in kurs[1]):
+        if kurs[1] != "users" and not ('old' in kurs[1]):
             if ch_or_zn == 4:
                 cur.execute("SELECT *, '{}' FROM '{}' WHERE day = '{}' AND teach1 = '{}' ".format(kurs[1], kurs[1],
                                                                                                   day.weekday(),
@@ -279,7 +289,12 @@ async def get_teach_rasp(day, message):
                                                                                                   user[3]))
             rasp1 = list(cur.fetchall())
             rasp.extend(rasp1)
+
     rasp = sorted(rasp, key=lambda para: datetime.datetime.strptime(para[1].split('-')[0], '%H.%M'))
+
+    temp_rasp = []
+    [temp_rasp.append(x) for x in rasp if x not in temp_rasp]
+    rasp = temp_rasp
     text = text = f'<b><u>{number_in_days.get(day.weekday())}</u></b>'
     text = f'<i>{user[3]}   [{day.strftime("%d.%m.%Y")}]</i>\n' + text
     if ch_or_zn == 4:
@@ -295,13 +310,14 @@ async def get_teach_rasp(day, message):
         if k != 0 and rasp[i][1] != rasp[i - 1][1]:
             text = text + f') [{rasp[i - 1][ch_or_zn + 2]}]\n\n'
             k = 0
+
         if rasp[i][ch_or_zn] is not None:
             if rasp[i][1] != rasp[i - 1][1] or i == 0:
                 text = text + f'> <b><i>{rasp[i][1]}</i>:</b>\n'
                 text = text + f'{normalize(rasp[i][ch_or_zn])} ({rasp[i][10]}: {rasp[i][3]}'
                 k += 1
             else:
-                text = text + f', {rasp[i][2]}'
+                text = text + f', {rasp[i][3]}'
     if k != 0:
         text = text + f') [{rasp[len(rasp) - 1][ch_or_zn + 2]}]\n\n'
         k = 0
@@ -310,8 +326,13 @@ async def get_teach_rasp(day, message):
 
 async def day_rasp(message: types.Message, day):
     user = await get_user(message.from_user.id)
-    ch_or_zn = chisl_or_znam(day)   # узнаем какая сейчас неделя: числитель или знаменатель
-    rasp = list(await get_rasp(day.weekday(), user[0], user[1]))  # получаем данные из базы данных, где нужный день недели, курс и группа
+    ch_or_zn = chisl_or_znam(day)  # узнаем какая сейчас неделя: числитель или знаменатель
+    rasp = list(await get_rasp(day.weekday(), user[0],
+                               user[1]))  # получаем данные из базы данных, где нужный день недели, курс и группа
+    # temp_rasp = []
+    # [temp_rasp.append(x) for x in rasp if x not in temp_rasp]
+    # rasp = temp_rasp
+
     text = f'<b><u>{number_in_days.get(day.weekday())}</u></b>'
     text = f'<i>{user[0]} {user[1]}   [{day.strftime("%d.%m.%Y")}]</i>\n' + text
     if ch_or_zn == 4:
@@ -321,14 +342,17 @@ async def day_rasp(message: types.Message, day):
     j = 1
 
     for l in range(1, len(rasp)):
-        if rasp[0] == rasp[l]:
+        if rasp[0][1] == rasp[l][1]:
             j += 1
 
     for m in range(len(rasp) // j):
         for k in range(j):
             i = m + (len(rasp) // j) * k
-            if (rasp[i][ch_or_zn] is not None and rasp[i][ch_or_zn] != rasp[m + (len(rasp) // j) * (k - 1)][
-                ch_or_zn]) or (rasp[i][ch_or_zn] is not None and k == 0):
+            if (rasp[i][ch_or_zn] is not None and (rasp[i][ch_or_zn] != rasp[m + (len(rasp) // j) * (k - 1)][
+                ch_or_zn] or rasp[i][ch_or_zn + 1] != rasp[m + (len(rasp) // j) * (k - 1)][
+                                                       ch_or_zn + 1] or rasp[i][ch_or_zn + 2] !=
+                                                   rasp[m + (len(rasp) // j) * (k - 1)][
+                                                       ch_or_zn + 2])) or (rasp[i][ch_or_zn] is not None and k == 0):
                 text = text + f'> <b><i>{rasp[i][1]}</i>:</b>\n'
 
                 if len(normalize(rasp[i][ch_or_zn + 1])) + len(normalize(rasp[i][ch_or_zn + 2])) > 0:
@@ -369,18 +393,25 @@ async def day_rasp(message: types.Message, day):
     return text
 
 
-
-
 def cut_teach(s: str):
     split_s = list()
     if s is not None:
         list_s = s.split()
         j = len(list_s)
         for i in range(len(list_s)):
+            # print(list_s[i])
             if len(list_s[i]) == 4:
-                if list_s[i][0].isalpha() and list_s[i][1]== '.' and list_s[i][2].isalpha() and list_s[i][3]== '.':
+                if list_s[i][0].isalpha() and list_s[i][1] == '.' and list_s[i][2].isalpha() and list_s[i][3] == '.':
                     j = i
                     break
+            elif len(list_s) >= i + 1 and len(list_s[i]) == 2 and len(list_s[i + 1]) == 2:
+                if list_s[i][0].istitle() and list_s[i][1] == '.' and list_s[i + 1][0].istitle() and list_s[i][
+                    1] == '.':
+                    j = i
+                    list_s[i] += list_s[i + 1]
+                    list_s.pop(i + 1)
+                    break
+
         if j == len(list_s):
             split_s.append(" ".join(list_s))
             split_s.append(None)
@@ -388,13 +419,13 @@ def cut_teach(s: str):
         else:
             split_s.append(" ".join(list_s[:j - 1]))
             split_s.append(" ".join(list_s[j - 1: j + 1]))
-            split_s.append(" ".join(list_s[j+1:]))
+            split_s.append(" ".join(list_s[j + 1:]))
 
         if split_s[1] is None and split_s[0] is not None:
-            for i in range(len(split_s[0])-3):
-                if (split_s[0][i].isalpha() and split_s[0][i].istitle()) and split_s[0][i+1] == '.' \
-                        and (split_s[0][i+2].isalpha() and split_s[0][i+2].istitle()) \
-                        and (split_s[0][i+3] =='.' or split_s[0][i+3].isspace()):
+            for i in range(len(split_s[0]) - 3):
+                if (split_s[0][i].isalpha() and split_s[0][i].istitle()) and split_s[0][i + 1] == '.' \
+                        and (split_s[0][i + 2].isalpha() and split_s[0][i + 2].istitle()) \
+                        and (split_s[0][i + 3] == '.' or split_s[0][i + 3].isspace()):
                     j = i
 
                     spaces = 0
@@ -405,9 +436,9 @@ def cut_teach(s: str):
                         else:
                             j += -1
 
-                    split_s[1] = split_s[0][j+1: i+4].strip()
-                    split_s[2] = split_s[0][i+4:].strip()
-                    split_s[0] = split_s[0][:j+1].strip()
+                    split_s[1] = split_s[0][j + 1: i + 4].strip()
+                    split_s[2] = split_s[0][i + 4:].strip()
+                    split_s[0] = split_s[0][:j + 1].strip()
                     if split_s[1][-1] != '.':
                         split_s[1] = split_s[1] + '.'
 
@@ -422,12 +453,19 @@ def cut_teach(s: str):
         split_s.append(None)
         split_s.append(None)
         split_s.append(None)
+
+    if split_s[0] is not None:
+        split_s[0] = split_s[0].strip(',')
+    if split_s[1] is not None:
+        split_s[1] = split_s[1].strip(',')
+    if split_s[2] is not None:
+        split_s[2] = split_s[2].strip(',')
     return split_s
 
 
 def parse_kurs(col_begin):
     book = openpyxl.open("xl.xlsx")  # открытие excel файла
-    sheet = book.active              # делаем лист активным
+    sheet = book.active  # делаем лист активным
 
     corr = 0
 
@@ -506,7 +544,7 @@ async def parse_xl():
     parse_kurs(col_begin)
     for j in range(sheet.max_column):
         if (cell_value(sheet, 4, j)) is None:
-            if cell_value(sheet, 4, j+1) is None and cell_value(sheet, 4, j+2) is None:
+            if cell_value(sheet, 4, j + 1) is None and cell_value(sheet, 4, j + 2) is None:
                 return 0
 
             j += 1
@@ -514,3 +552,93 @@ async def parse_xl():
             parse_kurs(col_begin)
 
 
+def parse_spo():
+    book = openpyxl.open("spo.xlsx")
+    print("открыто")
+    sheet = book.active  # делаем лист активным
+
+    col = 2
+
+    # проходим все ячейки с расписанием и записываем данные в списки
+    while (cell_value(sheet, 3, col)) is not None:
+        row = 5
+        group_para = list()
+        while cell_value(sheet, row, 1) is not None or cell_value(sheet, row + 1, 1) is not None or cell_value(sheet,
+                                                                                                               row + 2,
+                                                                                                               1) or cell_value(
+                sheet, row + 3, 1) or cell_value(sheet, row + 4, 1):
+            if cell_value(sheet, row, 1) is not None:
+                print(cell_value(sheet, row, 1))
+                para = list()
+                para.append(cell_value(sheet, row, 0))
+                para.append(cell_value(sheet, row, 1))
+                para.append(cell_value(sheet, 2, col))
+                para.append(cell_value(sheet, 3, col))
+                para.extend(cut_teach(cell_value(sheet, row, col)))
+
+                if cell_value(sheet, row, 1) == cell_value(sheet, row + 1, 1):
+                    para.extend(cut_teach(cell_value(sheet, row + 1, col)))
+                    step = 2
+                else:
+                    para.extend(cut_teach(cell_value(sheet, row, col)))
+                    step = 1
+
+                if para[4] is not None and len(para[4]) < 2:
+                    para[4] = None
+
+                if para[7] is not None and len(para[7]) < 2:
+                    para[7] = None
+
+                para[0] = "".join(para[0].split('\n'))
+                para[0] = "".join(para[0].split())
+                para[0] = days_in_number.get(para[0].capitalize())
+
+                split_spec = para[3].split()
+                para[3] = ''
+                for word in split_spec:
+                    if word.strip(')') == 'чел' or word.strip(')') == "после" or word.strip(')') == "курс":
+                        pass
+
+                    elif word.strip('(').strip(')') == '9' or word.strip('(').strip(')') == '11':
+                        para[3] += '(' + word.strip('(').strip(')') + ')'
+
+                    elif '(' in word or ')' in word:
+                        pass
+
+                    else:
+                        if len(word) > 1:
+                            para[3] += word[0].upper()
+                        else:
+                            para[3] += word
+
+                para[3] = para[2] + " " + para[3]
+                para[2] = None
+
+                # if para[3] != '':
+                #     if para[3].split()[0] == "Группа" and len(para[3].split()) > 1:
+                #         para[3] = para[3].split()[1:]
+                #         para[3] = ''.join(para[3])
+                #
+                # if para[3] == '':
+                #     para[3] = cell_value(sheet, 4, col)
+                #     for i in range(len(para[3])):
+                #         if para[3].isspace():
+                #             para[3] = para[3][:i]
+                #             break
+
+                # if len(para[3]) > 10:
+                #     para[3] = (para[3].split())[0]
+                # print(para[3])
+
+                group_para.append(para)
+
+                row += step
+            else:
+                row += 1
+
+        create_table_rasp("СПО")
+
+        for par in group_para:
+            add_rasp(par, "СПО")
+
+        col += 1

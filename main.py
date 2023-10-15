@@ -1,4 +1,5 @@
 from aiogram import Bot, Dispatcher, types, executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from aiogram.utils.executor import start_webhook
 from aiogram.utils.exceptions import TelegramAPIError
@@ -13,7 +14,7 @@ from keyboard import *
 from config import TOKEN
 
 bot = Bot(TOKEN, parse_mode="html")
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=MemoryStorage())
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,6 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 
-
 def get_ngrok_url():
     url = "http://localhost:4040/api/tunnels/"
     res = requests.get(url)
@@ -70,19 +70,19 @@ def get_ngrok_url():
 
 
 async def on_startup(_):
-    # WEBHOOK_HOST = get_ngrok_url()
-    # WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-    #
-    # await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)  # передаём адрес куда слать апдейты
+    WEBHOOK_HOST = get_ngrok_url()
+    WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
-    await db_start()
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)  # передаём адрес куда слать апдейты
+
+    db_start()
     await set_commands(bot)
     await bot.send_message(admins_id, "Бот запущен")
 
 
 async def on_startup1(_):
-    await db_start()
-    await create_table_users()
+    db_start()
+    create_table_users()
 
 
 async def on_shutdown(_):
@@ -116,7 +116,7 @@ async def user_reg_kurs(message):
         if kurs[1] != 'users' and not('old' in kurs[1]):
             ib = InlineKeyboardButton(kurs[1], callback_data=cb_kurs.new(number=kurs[1]))   # создание Inline-кнопки
             i_kb_kurs.insert(ib)        # добавление кнопки в клавиатуру
-    ib = InlineKeyboardButton("Преподаватель", callback_data='Преподаватель')
+    ib = InlineKeyboardButton("Преподаватель", callback_data=cb_pag_teacher.new(pag=0))
     i_kb_kurs.add(ib)
     if isinstance(message, types.Message):
         await message.delete()
@@ -128,12 +128,16 @@ async def user_reg_kurs(message):
         await bot.answer_callback_query(message.id)
 
 
-
 @dp.callback_query_handler(cb_kurs.filter())
 async def user_reg_group(callback_query: types.CallbackQuery, callback_data: dict):
     groups = await get_groups(callback_data.get('number'))
     groups.sort()
-    i_kb_groups = InlineKeyboardMarkup(row_width=3)
+    if callback_data.get('number') == "СПО":
+        width = 2
+    else:
+        width = 3
+
+    i_kb_groups = InlineKeyboardMarkup(row_width=width)
 
     if len(groups) > 1:
         for i in range(len(groups)-1):
@@ -165,33 +169,54 @@ async def user_reg_group(callback_query: types.CallbackQuery, callback_data: dic
     i_kb_groups.add(ib)
     # await callback_query.message.delete()
     await bot.answer_callback_query(callback_query.id)
-    await callback_query.message.edit_text(text = "Замечательно! \nВыбери свою группу:", reply_markup=i_kb_groups)
-    # await callback_query.message.answer("Выберите группу", reply_markup=i_kb_groups)
+    try:
+        await callback_query.message.edit_text(text="Замечательно! \nВыбери свою группу:", reply_markup=i_kb_groups)
+    except Exception:
+        await callback_query.message.answer(text="Замечательно! \nВыбери свою группу:", reply_markup=i_kb_groups)
 
 
-@dp.callback_query_handler(text="Преподаватель")
-async def user_reg_teach(callback_query: types.CallbackQuery):
-    await create_table_users()
+@dp.callback_query_handler(cb_pag_teacher.filter())
+async def user_reg_teach(callback_query: types.CallbackQuery, callback_data: dict):
+    create_table_users()
 
     i_kb = InlineKeyboardMarkup(row_width=2)
     teachers = await get_teachers()
     teachers.sort()
-    for teacher in teachers:
-        ib = InlineKeyboardButton(str(teacher[0]), callback_data=cb_teacher.new(name=str(teacher[0])))
+
+    pag = int(callback_data["pag"])
+
+    start = pag * 24
+    stop = (pag + 1) * 24 if (pag + 1) * 24 < len(teachers) else len(teachers)
+    for i in range(start, stop):
+        ib = InlineKeyboardButton(str(teachers[i][0]), callback_data=cb_teacher.new(name=str(teachers[i][0])))
         i_kb.insert(ib)
-    ib = InlineKeyboardButton("<", callback_data='kurs')
-    i_kb.add(ib)
-    await create_table_users()
+
+    spec_buttons = []
+
+    if pag > 0:
+        ib = InlineKeyboardButton("<", callback_data=cb_pag_teacher.new(pag=pag-1))
+        spec_buttons.append(ib)
+
+    ib_back = InlineKeyboardButton("Назад", callback_data='kurs')
+    spec_buttons.append(ib_back)
+    if stop != len(teachers):
+        ib = InlineKeyboardButton(">", callback_data=cb_pag_teacher.new(pag=pag + 1))
+        spec_buttons.append(ib)
+
+    i_kb.row(*spec_buttons)
+
+    create_table_users()
     await create_profile_teacher(callback_query, '')
     user = list(await get_user(callback_query.from_user.id))
     user[2] = 1
     user[3] = ''
     await update_profile(callback_query, user)
-    text = "Замечательно\nНайдите себя в списке:"
+    text = "Замечательно\nНайдите себя в списке:\n"
+    text += f"<i>\nСтраница <b>{pag+1}</b></i>"
     if isinstance(callback_query, types.CallbackQuery):
         await bot.answer_callback_query(callback_query.id)
-        await callback_query.message.delete()
-        await callback_query.message.answer(text, reply_markup=i_kb)
+        # await callback_query.message.delete()
+        await callback_query.message.edit_text(text, reply_markup=i_kb)
     else:
         await callback_query.answer(text, reply_markup=i_kb)
 
@@ -203,12 +228,16 @@ async def reg_teacher(callback_query: types.CallbackQuery, callback_data: dict):
     await update_profile(callback_query, user)
     await bot.answer_callback_query(callback_query.id)
     # await callback_query.message.delete()
-    await callback_query.message.edit_text(f"""Супер! \nРегистрация прошла успешно\n<i>Поиск по преподавателю ({user[3]})</i>""")
+    text = f"""Супер! \nРегистрация прошла успешно\n<i>Поиск по преподавателю ({user[3]})</i> \n\nТак же /communication позволит Вам узнать номера деканата и кафедр и связаться с нами если обнаружите ошибку :)"""
+    try:
+        await callback_query.message.edit_text(text)
+    except Exception:
+        await callback_query.message.answer(text)
 
 
 @dp.callback_query_handler(cb_group.filter())
 async def user_reg(callback_query: types.CallbackQuery, callback_data: dict):
-    await create_table_users()
+    create_table_users()
     await create_profile_student(callback_query, callback_data.get('kurs'), callback_data.get('groups'))
     user = list(await get_user(callback_query.from_user.id))
     user[0] = callback_data.get('kurs')
@@ -217,7 +246,13 @@ async def user_reg(callback_query: types.CallbackQuery, callback_data: dict):
     await update_profile(callback_query, user)
     await bot.answer_callback_query(callback_query.id)
     # await callback_query.message.delete()
-    await callback_query.message.edit_text(f"Супер! \nРегистрация прошла успешно\n<i>Поиск по группе ({user[0]}: {user[1]})</i>")
+    text = (f"Супер! \nРегистрация прошла успешно\n<i>Поиск по группе ({user[0]}: {user[1]})</i>"
+            f"\n\n"
+            f"Так же /communication позволит Вам узнать номера деканата и кафедр и связаться с нами если обнаружите ошибку :)")
+    try:
+        await callback_query.message.edit_text(text)
+    except Exception:
+        await callback_query.message.answer(text)
 
 
 @dp.callback_query_handler(text="Нет")
@@ -232,7 +267,10 @@ async def callback_no(callback_query: types.CallbackQuery):
     await update_profile(callback_query, user)
     await bot.answer_callback_query(callback_query.id)
     # await callback_query.message.delete()
-    await callback_query.message.edit_text(text)
+    try:
+        await callback_query.message.edit_text(text)
+    except Exception:
+        await callback_query.message.answer(text)
 
 
 @dp.message_handler(commands=["today"])
@@ -339,35 +377,6 @@ async def week_rasp(message: types.Message):
         await message.answer(text, parse_mode='html', reply_markup=ikb)
 
 
-# @dp.message_handler(commands=["teacher_or_student"])
-# async def teach_or_stud(message: types.Message):
-#     await create_table_users()
-#     text = ''
-#     i_kb = InlineKeyboardMarkup()
-#     await create_profile_teacher(message, '')
-#     user = list(await get_user(message.from_user.id))
-#     if user[2] == 0:
-#         user[2] = 1
-#         if user[3] == '':
-#             await user_reg_teach(message)
-#         else:
-#             text = f"Изменить преподавателя?\n<i>{user[3]}</i>"
-#             ib = InlineKeyboardButton("Нет", callback_data='Нет')
-#             ib1 = InlineKeyboardButton("Да", callback_data='Преподаватель')
-#             i_kb.add(ib, ib1)
-#
-#     else:
-#         if user[0] is None:
-#             await user_reg_kurs(message)
-#         else:
-#             text = f"Сменить группу/курс?\n<i>{user[0]}: {user[1]}</i>"
-#             ib = InlineKeyboardButton("Нет", callback_data='Нет')
-#             ib1 = InlineKeyboardButton("Да", callback_data='register')
-#             i_kb.add(ib, ib1)
-#     await message.delete()
-#     await message.answer(text, reply_markup=i_kb)
-
-
 @dp.callback_query_handler(text="choose_month")
 @dp.message_handler(commands=['day'])
 async def choose_month(message: types.Message):
@@ -382,7 +391,7 @@ async def choose_month(message: types.Message):
                 ib = InlineKeyboardButton(str(i), callback_data=cb_month.new(number=str(i)))
                 i_kb.insert(ib)
         else:
-            for i in range(int(str_month), 12):
+            for i in range(int(str_month), 13):
                 ib = InlineKeyboardButton(str(i), callback_data=cb_month.new(number=str(i)))
                 i_kb.insert(ib)
 
@@ -453,39 +462,66 @@ async def date_rasp(callback_query: types.CallbackQuery, callback_data: dict):
 @dp.message_handler(content_types=['document'])     # отлавливаем сообщения являющиеся документом
 @dp.async_task      # этот декоратор используется для функций которые будут выполняться долго
 async def get_file_xl(message: types.Message):
+
     if str(message.from_user.id) == str(message.chat.id) == admins_id:
         if message.document.file_name.split('.')[-1] == 'xlsx':
-            file_id = message.document.file_id
-            file = await bot.get_file(file_id)
-            path_file = file.file_path
-            path = 'xl_new.xlsx'
-            await bot.download_file(path_file, path)          # скачиваем файл и сохраняем под именем 'xl_new.xlsx'
+            if message.caption and message.caption == "ВО":
+                file_id = message.document.file_id
+                file = await bot.get_file(file_id)
+                path_file = file.file_path
+                path = 'xl_new.xlsx'
+                await bot.download_file(path_file, path)          # скачиваем файл и сохраняем под именем 'xl_new.xlsx'
 
-            if os.path.exists('xl_old.xlsx'):
-                os.remove('xl_old.xlsx')
+                if os.path.exists('xl_old.xlsx'):
+                    os.remove('xl_old.xlsx')
 
-            if os.path.exists('xl.xlsx'):
-                os.rename('xl.xlsx', 'xl_old.xlsx')
+                if os.path.exists('xl.xlsx'):
+                    os.rename('xl.xlsx', 'xl_old.xlsx')
 
-            os.rename('xl_new.xlsx', 'xl.xlsx')
+                os.rename('xl_new.xlsx', 'xl.xlsx')
 
-            await delete_old()
-            kurses = await get_kurs()
-            for kurs in kurses:
-                if kurs[1] != 'users':
-                    await rename_tables(kurs)                # переименовывываем уже существующие таблицы с расписанием
-            await message.answer('Изменяем раписание')
-            await parse_xl()                                 # извлекаем данные из нового excel файла в базу данных
-            await message.answer('Расписание изменено')
-            print("Готово")
-            await get_all_diff()                             # сравниваем старое расписание с новым и отправляем различия пользователям
+                await delete_old()
+
+                kurses = await get_kurs()
+                for kurs in kurses:
+                    if kurs[1] != 'users' and kurs[1] != 'СПО':
+                        await rename_tables(kurs[1])                # переименовывываем уже существующие таблицы с расписанием
+                await message.answer('Изменяем раписание')
+                await parse_xl()                                 # извлекаем данные из нового excel файла в базу данных
+                await message.answer('Расписание изменено')
+                print("Готово")
+                # await get_all_diff()                             # сравниваем старое расписание с новым и отправляем различия пользователям
+
+            elif message.caption and message.caption == "СПО":
+                print("СПО")
+                file_id = message.document.file_id
+                file = await bot.get_file(file_id)
+                path_file = file.file_path
+                path = 'spo_new.xlsx'
+                await bot.download_file(path_file, path)
+
+                if os.path.exists('spo_old.xlsx'):
+                    os.remove('spo_old.xlsx')
+
+                if os.path.exists('spo.xlsx'):
+                    os.rename('spo.xlsx', 'spo_old.xlsx')
+
+                os.rename('spo_new.xlsx', 'spo.xlsx')
+
+                await delete_old_spo()
+
+                kurses = await get_kurs()
+                for kurs in kurses:
+                    if kurs[1] == "СПО":
+                        await rename_tables("СПО")
+
+                await message.answer('Изменяем раписание')
+                parse_spo()
+                await message.answer('Расписание изменено')
+
+                ("Готово")
         else:
             await message.answer('Неправильное разрешение')
-
-
-
-
-
 
 
 @dp.errors_handler(TelegramAPIError)
@@ -497,19 +533,20 @@ async def error_bot_handler(update: types.Update, exception) -> bool:
 
 
 
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     )
     logger.info("Starting bot")
-    # start_webhook(
-    #     dispatcher=dp,
-    #     webhook_path=WEBHOOK_PATH,
-    #     skip_updates=True,
-    #     on_startup=on_startup,
-    #     on_shutdown=on_shutdown,
-    #     host=WEBAPP_HOST,
-    #     port=WEBAPP_PORT)
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        skip_updates=True,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        host=WEBAPP_HOST,
+        port=WEBAPP_PORT)
+    # executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
 
